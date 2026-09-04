@@ -72,12 +72,7 @@ def format_datetime_local(dt):
 # Главная страница с графиком температуры
 @app.route("/")
 def read_index():
-    date_from, date_to = default_period()
-    return render_template_string(
-        HTML_TEMPLATE,
-        default_from=format_datetime_local(date_from),
-        default_to=format_datetime_local(date_to),
-    )
+    return render_template_string(HTML_TEMPLATE)
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -131,12 +126,12 @@ HTML_TEMPLATE = """
 
     <div class="controls">
         <div class="field">
-            <label for="dateFrom">От (местное UTC+7)</label>
-            <input type="datetime-local" id="dateFrom" value="{{ default_from }}">
+            <label for="dateFrom">От</label>
+            <input type="datetime-local" id="dateFrom">
         </div>
         <div class="field">
-            <label for="dateTo">До (местное UTC+7)</label>
-            <input type="datetime-local" id="dateTo" value="{{ default_to }}">
+            <label for="dateTo">До</label>
+            <input type="datetime-local" id="dateTo">
         </div>
         <button type="button" id="applyBtn">Показать</button>
         <button type="button" id="resetBtn">Последние 24 часа</button>
@@ -150,6 +145,33 @@ HTML_TEMPLATE = """
     <script>
         const ctx = document.getElementById('tempChart');
         let chart = null;
+        const TZ_OFFSET_HOURS = 7;
+
+        function pad2(n) {
+            return String(n).padStart(2, '0');
+        }
+
+        function toLocalInputValue(date) {
+            const shifted = new Date(date.getTime() + TZ_OFFSET_HOURS * 3600000);
+            return (
+                shifted.getUTCFullYear() + '-' +
+                pad2(shifted.getUTCMonth() + 1) + '-' +
+                pad2(shifted.getUTCDate()) + 'T' +
+                pad2(shifted.getUTCHours()) + ':' +
+                pad2(shifted.getUTCMinutes())
+            );
+        }
+
+        function last24hRange() {
+            const to = new Date();
+            const from = new Date(to.getTime() - 24 * 3600000);
+            return [toLocalInputValue(from), toLocalInputValue(to)];
+        }
+
+        function setPeriodInputs(fromValue, toValue) {
+            document.getElementById('dateFrom').value = fromValue;
+            document.getElementById('dateTo').value = toValue;
+        }
 
         function buildChart(labels, temperatures, humidities) {
             if (chart) {
@@ -244,19 +266,17 @@ HTML_TEMPLATE = """
             );
         });
 
-        document.getElementById('resetBtn').addEventListener('click', async () => {
-            const response = await fetch('/api/data');
-            const meta = await response.json();
-            document.getElementById('dateFrom').value = meta.period_from;
-            document.getElementById('dateTo').value = meta.period_to;
-            buildChart(
-                meta.data.map(item => item.date),
-                meta.data.map(item => item.temperature),
-                meta.data.map(item => item.humidity)
-            );
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            const [fromValue, toValue] = last24hRange();
+            setPeriodInputs(fromValue, toValue);
+            loadChart(fromValue, toValue);
         });
 
-        loadChart('{{ default_from }}', '{{ default_to }}');
+        {
+            const [fromValue, toValue] = last24hRange();
+            setPeriodInputs(fromValue, toValue);
+            loadChart(fromValue, toValue);
+        }
     </script>
 </body>
 </html>
