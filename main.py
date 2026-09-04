@@ -7,7 +7,18 @@ from flask import Flask, render_template_string, request, jsonify
 app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "weather.db")
+
+
+def resolve_db_path():
+    # На Amvera SQLite должен жить в постоянном томе /data
+    if "AMVERA" in os.environ or os.path.isdir("/data"):
+        data_dir = "/data"
+        os.makedirs(data_dir, exist_ok=True)
+        return os.path.join(data_dir, "weather.db")
+    return os.path.join(BASE_DIR, "weather.db")
+
+
+DB_PATH = resolve_db_path()
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
