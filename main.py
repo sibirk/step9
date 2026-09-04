@@ -1,7 +1,7 @@
 import os
 import sqlite3
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Flask, render_template_string, request, jsonify
 
 app = Flask(__name__)
@@ -43,8 +43,16 @@ def init_db():
 
 init_db()
 
+# То же смещение, что на Pico (send_temp.py TZ_OFFSET_HOURS)
+TZ_OFFSET_HOURS = 7
+
+
+def local_now():
+    return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=TZ_OFFSET_HOURS)
+
+
 def default_period():
-    now = datetime.now()
+    now = local_now()
     return now - timedelta(hours=24), now
 
 def parse_datetime(value):
@@ -123,11 +131,11 @@ HTML_TEMPLATE = """
 
     <div class="controls">
         <div class="field">
-            <label for="dateFrom">От</label>
+            <label for="dateFrom">От (местное UTC+7)</label>
             <input type="datetime-local" id="dateFrom" value="{{ default_from }}">
         </div>
         <div class="field">
-            <label for="dateTo">До</label>
+            <label for="dateTo">До (местное UTC+7)</label>
             <input type="datetime-local" id="dateTo" value="{{ default_to }}">
         </div>
         <button type="button" id="applyBtn">Показать</button>
