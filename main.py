@@ -27,28 +27,35 @@ def init_db():
         CREATE TABLE IF NOT EXISTS weather (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL,
-            temperature REAL NOT NULL
+            temperature REAL NOT NULL,
+            humidity REAL
         )
     """)
     conn.commit()
 
-    # Проверяем, пустая ли таблица
+    cursor.execute("PRAGMA table_info(weather)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if "humidity" not in columns:
+        cursor.execute("ALTER TABLE weather ADD COLUMN humidity REAL")
+        conn.commit()
+
     cursor.execute("SELECT COUNT(*) FROM weather")
     count = cursor.fetchone()[0]
 
-    # Если записей нет, генерируем демо-записи за последние 25 часов (шаг 1 минута)
     if count == 0:
         base_time = datetime.now()
         demo_data = []
         for i in range(1500):
-            # Шаг в 1 минуту назад для каждой последующей записи
             time_record = base_time - timedelta(minutes=i)
             str_time = time_record.strftime("%Y-%m-%d %H:%M:%S")
-            # Температура 25 +- 10 градусов (от 15.0 до 35.0)
             temp = round(random.uniform(15.0, 35.0), 1)
-            demo_data.append((str_time, temp))
+            humidity = round(random.uniform(35.0, 75.0), 1)
+            demo_data.append((str_time, temp, humidity))
 
-        cursor.executemany("INSERT INTO weather (date, temperature) VALUES (?, ?)", demo_data)
+        cursor.executemany(
+            "INSERT INTO weather (date, temperature, humidity) VALUES (?, ?, ?)",
+            demo_data,
+        )
         conn.commit()
 
     conn.close()
@@ -88,7 +95,7 @@ HTML_TEMPLATE = """
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Мониторинг температуры</title>
+    <title>Мониторинг температуры и влажности</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; background-color: #f9f9f9; color: #333; }
@@ -131,7 +138,7 @@ HTML_TEMPLATE = """
     </style>
 </head>
 <body>
-    <h1>График температуры</h1>
+    <h1>График температуры и влажности</h1>
 
     <div class="controls">
         <div class="field">
@@ -155,7 +162,7 @@ HTML_TEMPLATE = """
         const ctx = document.getElementById('tempChart');
         let chart = null;
 
-        function buildChart(labels, values) {
+        function buildChart(labels, temperatures, humidities) {
             if (chart) {
                 chart.destroy();
             }
@@ -171,16 +178,30 @@ HTML_TEMPLATE = """
                 type: 'line',
                 data: {
                     labels: labels,
-                    datasets: [{
-                        label: 'Температура, °C',
-                        data: values,
-                        borderColor: '#e74c3c',
-                        backgroundColor: 'rgba(231, 76, 60, 0.1)',
-                        tension: 0.2,
-                        fill: true,
-                        pointRadius: 2,
-                        pointHoverRadius: 5
-                    }]
+                    datasets: [
+                        {
+                            label: 'Температура, °C',
+                            data: temperatures,
+                            borderColor: '#e74c3c',
+                            backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                            tension: 0.2,
+                            fill: false,
+                            pointRadius: 2,
+                            pointHoverRadius: 5,
+                            yAxisID: 'yTemp'
+                        },
+                        {
+                            label: 'Влажность, %',
+                            data: humidities,
+                            borderColor: '#3498db',
+                            backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                            tension: 0.2,
+                            fill: false,
+                            pointRadius: 2,
+                            pointHoverRadius: 5,
+                            yAxisID: 'yHum'
+                        }
+                    ]
                 },
                 options: {
                     responsive: true,
@@ -191,8 +212,18 @@ HTML_TEMPLATE = """
                             title: { display: true, text: 'Дата и время' },
                             ticks: { maxRotation: 45, minRotation: 0 }
                         },
-                        y: {
+                        yTemp: {
+                            type: 'linear',
+                            position: 'left',
                             title: { display: true, text: 'Температура, °C' }
+                        },
+                        yHum: {
+                            type: 'linear',
+                            position: 'right',
+                            min: 0,
+                            max: 100,
+                            title: { display: true, text: 'Влажность, %' },
+                            grid: { drawOnChartArea: false }
                         }
                     },
                     plugins: {
@@ -212,7 +243,8 @@ HTML_TEMPLATE = """
 
             buildChart(
                 data.map(item => item.date),
-                data.map(item => item.temperature)
+                data.map(item => item.temperature),
+                data.map(item => item.humidity)
             );
         }
 
@@ -230,7 +262,8 @@ HTML_TEMPLATE = """
             document.getElementById('dateTo').value = meta.period_to;
             buildChart(
                 meta.data.map(item => item.date),
-                meta.data.map(item => item.temperature)
+                meta.data.map(item => item.temperature),
+                meta.data.map(item => item.humidity)
             );
         });
 
@@ -259,7 +292,7 @@ def get_data():
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT date, temperature
+        SELECT date, temperature, humidity
         FROM weather
         WHERE date >= ? AND date <= ?
         ORDER BY date ASC
@@ -269,7 +302,7 @@ def get_data():
     rows = cursor.fetchall()
     conn.close()
 
-    data = [{"date": row[0], "temperature": row[1]} for row in rows]
+    data = [{"date": row[0], "temperature": row[1], "humidity": row[2]} for row in rows]
 
     if not date_from_raw and not date_to_raw:
         return jsonify({
@@ -287,16 +320,26 @@ def add_api():
         data = request.get_json()
         date = data.get("date")
         temperature = data.get("temperature")
+        humidity = data.get("humidity")
     else:
         date = request.args.get("date")
         temperature = request.args.get("temperature")
+        humidity = request.args.get("humidity")
 
-    if not date or temperature is None:
-        return jsonify({"status": "error", "message": "Missing date or temperature"}), 400
+    if not date or temperature is None or humidity is None:
+        return jsonify({"status": "error", "message": "Missing date, temperature or humidity"}), 400
 
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO weather (date, temperature) VALUES (?, ?)", (date, float(temperature)))
+    cursor.execute(
+        "INSERT INTO weather (date, temperature, humidity) VALUES (?, ?, ?)",
+        (date, float(temperature), float(humidity)),
+    )
     conn.commit()
     conn.close()
-    return jsonify({"status": "success", "date": date, "temperature": float(temperature)})
+    return jsonify({
+        "status": "success",
+        "date": date,
+        "temperature": float(temperature),
+        "humidity": float(humidity),
+    })
