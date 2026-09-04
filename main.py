@@ -39,25 +39,6 @@ def init_db():
         cursor.execute("ALTER TABLE weather ADD COLUMN humidity REAL")
         conn.commit()
 
-    cursor.execute("SELECT COUNT(*) FROM weather")
-    count = cursor.fetchone()[0]
-
-    if count == 0:
-        base_time = datetime.now()
-        demo_data = []
-        for i in range(1500):
-            time_record = base_time - timedelta(minutes=i)
-            str_time = time_record.strftime("%Y-%m-%d %H:%M:%S")
-            temp = round(random.uniform(15.0, 35.0), 1)
-            humidity = round(random.uniform(35.0, 75.0), 1)
-            demo_data.append((str_time, temp, humidity))
-
-        cursor.executemany(
-            "INSERT INTO weather (date, temperature, humidity) VALUES (?, ?, ?)",
-            demo_data,
-        )
-        conn.commit()
-
     conn.close()
 
 init_db()
