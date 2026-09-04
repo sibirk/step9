@@ -20,6 +20,13 @@ def resolve_db_path():
 
 DB_PATH = resolve_db_path()
 
+def ensure_column(cursor, name, typedef):
+    cursor.execute("PRAGMA table_info(weather)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if name not in columns:
+        cursor.execute("ALTER TABLE weather ADD COLUMN %s %s" % (name, typedef))
+
+
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -27,18 +34,44 @@ def init_db():
         CREATE TABLE IF NOT EXISTS weather (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL,
-            temperature REAL NOT NULL,
-            humidity REAL
+            temperature REAL,
+            humidity REAL,
+            temperature2 REAL,
+            humidity2 REAL,
+            mq4 REAL,
+            mq4_alarm INTEGER
         )
     """)
-    conn.commit()
+    ensure_column(cursor, "humidity", "REAL")
+    ensure_column(cursor, "temperature2", "REAL")
+    ensure_column(cursor, "humidity2", "REAL")
+    ensure_column(cursor, "mq4", "REAL")
+    ensure_column(cursor, "mq4_alarm", "INTEGER")
 
     cursor.execute("PRAGMA table_info(weather)")
-    columns = [row[1] for row in cursor.fetchall()]
-    if "humidity" not in columns:
-        cursor.execute("ALTER TABLE weather ADD COLUMN humidity REAL")
-        conn.commit()
+    temp_col = [row for row in cursor.fetchall() if row[1] == "temperature"]
+    if temp_col and temp_col[0][3]:
+        cursor.execute("ALTER TABLE weather RENAME TO weather_old")
+        cursor.execute("""
+            CREATE TABLE weather (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                temperature REAL,
+                humidity REAL,
+                temperature2 REAL,
+                humidity2 REAL,
+                mq4 REAL,
+                mq4_alarm INTEGER
+            )
+        """)
+        cursor.execute("""
+            INSERT INTO weather (id, date, temperature, humidity, temperature2, humidity2, mq4, mq4_alarm)
+            SELECT id, date, temperature, humidity, temperature2, humidity2, mq4, mq4_alarm
+            FROM weather_old
+        """)
+        cursor.execute("DROP TABLE weather_old")
 
+    conn.commit()
     conn.close()
 
 init_db()
@@ -119,10 +152,11 @@ HTML_TEMPLATE = """
             border-radius: 6px;
         }
         .empty-msg { margin-top: 12px; color: #777; }
+        .chart-wrap + .chart-wrap { margin-top: 16px; }
     </style>
 </head>
 <body>
-    <h1>График температуры и влажности</h1>
+    <h1>График температуры, влажности и MQ-4</h1>
 
     <div class="controls">
         <div class="field">
@@ -141,10 +175,15 @@ HTML_TEMPLATE = """
         <canvas id="tempChart"></canvas>
         <p id="emptyMsg" class="empty-msg" style="display: none;">За выбранный период данных нет.</p>
     </div>
+    <div class="chart-wrap">
+        <canvas id="mqChart"></canvas>
+    </div>
 
     <script>
         const ctx = document.getElementById('tempChart');
+        const mqCtx = document.getElementById('mqChart');
         let chart = null;
+        let mqChart = null;
         const TZ_OFFSET_HOURS = 7;
 
         function pad2(n) {
@@ -173,12 +212,16 @@ HTML_TEMPLATE = """
             document.getElementById('dateTo').value = toValue;
         }
 
-        function buildChart(labels, temperatures, humidities) {
+        function buildChart(rows) {
             if (chart) {
                 chart.destroy();
             }
+            if (mqChart) {
+                mqChart.destroy();
+            }
 
             const emptyMsg = document.getElementById('emptyMsg');
+            const labels = rows.map(item => item.date);
             if (!labels.length) {
                 emptyMsg.style.display = 'block';
                 return;
@@ -191,25 +234,41 @@ HTML_TEMPLATE = """
                     labels: labels,
                     datasets: [
                         {
-                            label: 'Температура, °C',
-                            data: temperatures,
+                            label: 'T1, °C',
+                            data: rows.map(item => item.temperature),
                             borderColor: '#e74c3c',
-                            backgroundColor: 'rgba(231, 76, 60, 0.1)',
                             tension: 0.2,
                             fill: false,
                             pointRadius: 2,
-                            pointHoverRadius: 5,
                             yAxisID: 'yTemp'
                         },
                         {
-                            label: 'Влажность, %',
-                            data: humidities,
-                            borderColor: '#3498db',
-                            backgroundColor: 'rgba(52, 152, 219, 0.1)',
+                            label: 'T2, °C',
+                            data: rows.map(item => item.temperature2),
+                            borderColor: '#c0392b',
+                            borderDash: [6, 4],
                             tension: 0.2,
                             fill: false,
                             pointRadius: 2,
-                            pointHoverRadius: 5,
+                            yAxisID: 'yTemp'
+                        },
+                        {
+                            label: 'RH1, %',
+                            data: rows.map(item => item.humidity),
+                            borderColor: '#3498db',
+                            tension: 0.2,
+                            fill: false,
+                            pointRadius: 2,
+                            yAxisID: 'yHum'
+                        },
+                        {
+                            label: 'RH2, %',
+                            data: rows.map(item => item.humidity2),
+                            borderColor: '#1abc9c',
+                            borderDash: [6, 4],
+                            tension: 0.2,
+                            fill: false,
+                            pointRadius: 2,
                             yAxisID: 'yHum'
                         }
                     ]
@@ -242,6 +301,35 @@ HTML_TEMPLATE = """
                     }
                 }
             });
+
+            mqChart = new Chart(mqCtx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'MQ-4, мВ',
+                        data: rows.map(item => item.mq4),
+                        borderColor: '#8e44ad',
+                        tension: 0.2,
+                        fill: false,
+                        pointRadius: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    aspectRatio: 2.5,
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Дата и время' },
+                            ticks: { maxRotation: 45, minRotation: 0 }
+                        },
+                        y: {
+                            title: { display: true, text: 'MQ-4, мВ на GP26' }
+                        }
+                    }
+                }
+            });
         }
 
         async function loadChart(fromValue, toValue) {
@@ -251,12 +339,7 @@ HTML_TEMPLATE = """
 
             const response = await fetch('/api/data?' + params.toString());
             const data = await response.json();
-
-            buildChart(
-                data.map(item => item.date),
-                data.map(item => item.temperature),
-                data.map(item => item.humidity)
-            );
+            buildChart(data);
         }
 
         document.getElementById('applyBtn').addEventListener('click', () => {
@@ -301,7 +384,7 @@ def get_data():
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT date, temperature, humidity
+        SELECT date, temperature, humidity, temperature2, humidity2, mq4, mq4_alarm
         FROM weather
         WHERE date >= ? AND date <= ?
         ORDER BY date ASC
@@ -311,7 +394,15 @@ def get_data():
     rows = cursor.fetchall()
     conn.close()
 
-    data = [{"date": row[0], "temperature": row[1], "humidity": row[2]} for row in rows]
+    data = [{
+        "date": row[0],
+        "temperature": row[1],
+        "humidity": row[2],
+        "temperature2": row[3],
+        "humidity2": row[4],
+        "mq4": row[5],
+        "mq4_alarm": row[6],
+    } for row in rows]
 
     if not date_from_raw and not date_to_raw:
         return jsonify({
@@ -330,25 +421,60 @@ def add_api():
         date = data.get("date")
         temperature = data.get("temperature")
         humidity = data.get("humidity")
+        temperature2 = data.get("temperature2")
+        humidity2 = data.get("humidity2")
+        mq4 = data.get("mq4")
+        mq4_alarm = data.get("mq4_alarm")
     else:
         date = request.args.get("date")
         temperature = request.args.get("temperature")
         humidity = request.args.get("humidity")
+        temperature2 = request.args.get("temperature2")
+        humidity2 = request.args.get("humidity2")
+        mq4 = request.args.get("mq4")
+        mq4_alarm = request.args.get("mq4_alarm")
 
-    if not date or temperature is None or humidity is None:
-        return jsonify({"status": "error", "message": "Missing date, temperature or humidity"}), 400
+    if not date:
+        return jsonify({"status": "error", "message": "Missing date"}), 400
+    if temperature is None and temperature2 is None and mq4 is None:
+        return jsonify({"status": "error", "message": "Missing sensor data"}), 400
+
+    def as_float(value):
+        if value is None or value == "":
+            return None
+        return float(value)
+
+    def as_int(value):
+        if value is None or value == "":
+            return None
+        return int(float(value))
 
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
-        "INSERT INTO weather (date, temperature, humidity) VALUES (?, ?, ?)",
-        (date, float(temperature), float(humidity)),
+        """
+        INSERT INTO weather (date, temperature, humidity, temperature2, humidity2, mq4, mq4_alarm)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            date,
+            as_float(temperature),
+            as_float(humidity),
+            as_float(temperature2),
+            as_float(humidity2),
+            as_float(mq4),
+            as_int(mq4_alarm),
+        ),
     )
     conn.commit()
     conn.close()
     return jsonify({
         "status": "success",
         "date": date,
-        "temperature": float(temperature),
-        "humidity": float(humidity),
+        "temperature": as_float(temperature),
+        "humidity": as_float(humidity),
+        "temperature2": as_float(temperature2),
+        "humidity2": as_float(humidity2),
+        "mq4": as_float(mq4),
+        "mq4_alarm": as_int(mq4_alarm),
     })
