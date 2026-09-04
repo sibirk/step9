@@ -175,15 +175,10 @@ HTML_TEMPLATE = """
         <canvas id="tempChart"></canvas>
         <p id="emptyMsg" class="empty-msg" style="display: none;">За выбранный период данных нет.</p>
     </div>
-    <div class="chart-wrap">
-        <canvas id="mqChart"></canvas>
-    </div>
 
     <script>
         const ctx = document.getElementById('tempChart');
-        const mqCtx = document.getElementById('mqChart');
         let chart = null;
-        let mqChart = null;
         const TZ_OFFSET_HOURS = 7;
 
         function pad2(n) {
@@ -215,9 +210,6 @@ HTML_TEMPLATE = """
         function buildChart(rows) {
             if (chart) {
                 chart.destroy();
-            }
-            if (mqChart) {
-                mqChart.destroy();
             }
 
             const emptyMsg = document.getElementById('emptyMsg');
@@ -270,6 +262,15 @@ HTML_TEMPLATE = """
                             fill: false,
                             pointRadius: 2,
                             yAxisID: 'yHum'
+                        },
+                        {
+                            label: 'MQ-4, мВ',
+                            data: rows.map(item => item.mq4),
+                            borderColor: '#8e44ad',
+                            tension: 0.2,
+                            fill: false,
+                            pointRadius: 2,
+                            yAxisID: 'yMq'
                         }
                     ]
                 },
@@ -294,39 +295,16 @@ HTML_TEMPLATE = """
                             max: 100,
                             title: { display: true, text: 'Влажность, %' },
                             grid: { drawOnChartArea: false }
+                        },
+                        yMq: {
+                            type: 'linear',
+                            position: 'right',
+                            title: { display: true, text: 'MQ-4, мВ' },
+                            grid: { drawOnChartArea: false }
                         }
                     },
                     plugins: {
                         legend: { display: true }
-                    }
-                }
-            });
-
-            mqChart = new Chart(mqCtx, {
-                type: 'line',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'MQ-4, мВ',
-                        data: rows.map(item => item.mq4),
-                        borderColor: '#8e44ad',
-                        tension: 0.2,
-                        fill: false,
-                        pointRadius: 2
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: true,
-                    aspectRatio: 2.5,
-                    scales: {
-                        x: {
-                            title: { display: true, text: 'Дата и время' },
-                            ticks: { maxRotation: 45, minRotation: 0 }
-                        },
-                        y: {
-                            title: { display: true, text: 'MQ-4, мВ на GP26' }
-                        }
                     }
                 }
             });
