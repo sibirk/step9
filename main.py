@@ -20,6 +20,23 @@ def resolve_db_path():
 
 DB_PATH = resolve_db_path()
 
+# Совпадает с API_KEY на Pico (send_temp.py). На Amvera можно задать STEP9_API_KEY.
+API_KEY = os.environ.get("STEP9_API_KEY") or os.environ.get("API_KEY") or "2s9-8f3aC1eB7dQ4nP6wK9"
+
+
+def api_key_ok():
+    header = request.headers.get("X-Api-Key") or ""
+    auth = request.headers.get("Authorization") or ""
+    if auth.lower().startswith("bearer "):
+        auth = auth[7:].strip()
+    body_key = ""
+    if request.is_json:
+        body = request.get_json(silent=True) or {}
+        body_key = body.get("api_key") or ""
+    provided = header or auth or body_key or request.args.get("api_key") or ""
+    return bool(API_KEY) and provided == API_KEY
+
+
 def ensure_column(cursor, name, typedef):
     cursor.execute("PRAGMA table_info(weather)")
     columns = [row[1] for row in cursor.fetchall()]
@@ -394,6 +411,9 @@ def get_data():
 # API метод для добавления данных (принимает как JSON, так и URL-параметры)
 @app.route("/api/add", methods=["POST", "GET"])
 def add_api():
+    if not api_key_ok():
+        return jsonify({"status": "error", "message": "Unauthorized"}), 401
+
     if request.is_json:
         data = request.get_json()
         date = data.get("date")
