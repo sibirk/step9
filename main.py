@@ -88,6 +88,11 @@ def init_db():
         """)
         cursor.execute("DROP TABLE weather_old")
 
+    ensure_column(cursor, "ds1", "REAL")
+    ensure_column(cursor, "ds2", "REAL")
+    ensure_column(cursor, "ds3", "REAL")
+    ensure_column(cursor, "ds4", "REAL")
+
     conn.commit()
     conn.close()
 
@@ -170,10 +175,11 @@ HTML_TEMPLATE = """
         }
         .empty-msg { margin-top: 12px; color: #777; }
         .chart-wrap + .chart-wrap { margin-top: 16px; }
+        h2 { color: #2c3e50; font-size: 18px; margin: 0 0 12px; }
     </style>
 </head>
 <body>
-    <h1>График температуры, влажности и MQ-4</h1>
+    <h1>Графики датчиков</h1>
 
     <div class="controls">
         <div class="field">
@@ -188,14 +194,23 @@ HTML_TEMPLATE = """
         <button type="button" id="resetBtn">Последние 24 часа</button>
     </div>
 
-    <div class="chart-wrap">
-        <canvas id="tempChart"></canvas>
-        <p id="emptyMsg" class="empty-msg" style="display: none;">За выбранный период данных нет.</p>
+    <p id="emptyMsg" class="empty-msg" style="display: none;">За выбранный период данных нет.</p>
+    <div id="charts">
+        <div class="chart-wrap">
+            <h2>Температура, влажность и MQ-4</h2>
+            <canvas id="tempChart"></canvas>
+        </div>
+        <div class="chart-wrap">
+            <h2>DS18B20</h2>
+            <canvas id="dsChart"></canvas>
+        </div>
     </div>
 
     <script>
         const ctx = document.getElementById('tempChart');
+        const dsCtx = document.getElementById('dsChart');
         let chart = null;
+        let dsChart = null;
         const TZ_OFFSET_HOURS = 7;
 
         function pad2(n) {
@@ -224,19 +239,38 @@ HTML_TEMPLATE = """
             document.getElementById('dateTo').value = toValue;
         }
 
-        function buildChart(rows) {
+        function destroyCharts() {
             if (chart) {
                 chart.destroy();
+                chart = null;
             }
+            if (dsChart) {
+                dsChart.destroy();
+                dsChart = null;
+            }
+        }
+
+        function timeScale() {
+            return {
+                title: { display: true, text: 'Дата и время' },
+                ticks: { maxRotation: 45, minRotation: 0 }
+            };
+        }
+
+        function buildChart(rows) {
+            destroyCharts();
 
             const emptyMsg = document.getElementById('emptyMsg');
+            const charts = document.getElementById('charts');
             const labels = rows.map(item => item.date);
             if (!labels.length) {
                 emptyMsg.style.display = 'block';
+                charts.style.display = 'none';
                 return;
             }
 
             emptyMsg.style.display = 'none';
+            charts.style.display = 'block';
             chart = new Chart(ctx, {
                 type: 'line',
                 data: {
@@ -296,10 +330,7 @@ HTML_TEMPLATE = """
                     maintainAspectRatio: true,
                     aspectRatio: 2.5,
                     scales: {
-                        x: {
-                            title: { display: true, text: 'Дата и время' },
-                            ticks: { maxRotation: 45, minRotation: 0 }
-                        },
+                        x: timeScale(),
                         yTemp: {
                             type: 'linear',
                             position: 'left',
@@ -318,6 +349,66 @@ HTML_TEMPLATE = """
                             position: 'right',
                             title: { display: true, text: 'MQ-4, мВ' },
                             grid: { drawOnChartArea: false }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: true }
+                    }
+                }
+            });
+            dsChart = new Chart(dsCtx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'DS1, °C',
+                            data: rows.map(item => item.ds1),
+                            borderColor: '#e67e22',
+                            tension: 0.2,
+                            fill: false,
+                            pointRadius: 2,
+                            spanGaps: true
+                        },
+                        {
+                            label: 'DS2, °C',
+                            data: rows.map(item => item.ds2),
+                            borderColor: '#f1c40f',
+                            tension: 0.2,
+                            fill: false,
+                            pointRadius: 2,
+                            spanGaps: true
+                        },
+                        {
+                            label: 'DS3, °C',
+                            data: rows.map(item => item.ds3),
+                            borderColor: '#16a085',
+                            tension: 0.2,
+                            fill: false,
+                            pointRadius: 2,
+                            spanGaps: true
+                        },
+                        {
+                            label: 'DS4, °C',
+                            data: rows.map(item => item.ds4),
+                            borderColor: '#2c3e50',
+                            tension: 0.2,
+                            fill: false,
+                            pointRadius: 2,
+                            spanGaps: true
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    aspectRatio: 2.5,
+                    scales: {
+                        x: timeScale(),
+                        y: {
+                            type: 'linear',
+                            position: 'left',
+                            title: { display: true, text: 'Температура, °C' }
                         }
                     },
                     plugins: {
@@ -379,7 +470,8 @@ def get_data():
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT date, temperature, humidity, temperature2, humidity2, mq4, mq4_alarm
+        SELECT date, temperature, humidity, temperature2, humidity2, mq4, mq4_alarm,
+               ds1, ds2, ds3, ds4
         FROM weather
         WHERE date >= ? AND date <= ?
         ORDER BY date ASC
@@ -397,6 +489,10 @@ def get_data():
         "humidity2": row[4],
         "mq4": row[5],
         "mq4_alarm": row[6],
+        "ds1": row[7],
+        "ds2": row[8],
+        "ds3": row[9],
+        "ds4": row[10],
     } for row in rows]
 
     if not date_from_raw and not date_to_raw:
@@ -423,6 +519,10 @@ def add_api():
         humidity2 = data.get("humidity2")
         mq4 = data.get("mq4")
         mq4_alarm = data.get("mq4_alarm")
+        ds1 = data.get("ds1")
+        ds2 = data.get("ds2")
+        ds3 = data.get("ds3")
+        ds4 = data.get("ds4")
     else:
         date = request.args.get("date")
         temperature = request.args.get("temperature")
@@ -431,10 +531,22 @@ def add_api():
         humidity2 = request.args.get("humidity2")
         mq4 = request.args.get("mq4")
         mq4_alarm = request.args.get("mq4_alarm")
+        ds1 = request.args.get("ds1")
+        ds2 = request.args.get("ds2")
+        ds3 = request.args.get("ds3")
+        ds4 = request.args.get("ds4")
 
     if not date:
         return jsonify({"status": "error", "message": "Missing date"}), 400
-    if temperature is None and temperature2 is None and mq4 is None:
+    if (
+        temperature is None
+        and temperature2 is None
+        and mq4 is None
+        and ds1 is None
+        and ds2 is None
+        and ds3 is None
+        and ds4 is None
+    ):
         return jsonify({"status": "error", "message": "Missing sensor data"}), 400
 
     def as_float(value):
@@ -451,8 +563,11 @@ def add_api():
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT INTO weather (date, temperature, humidity, temperature2, humidity2, mq4, mq4_alarm)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO weather (
+            date, temperature, humidity, temperature2, humidity2, mq4, mq4_alarm,
+            ds1, ds2, ds3, ds4
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             date,
@@ -462,6 +577,10 @@ def add_api():
             as_float(humidity2),
             as_float(mq4),
             as_int(mq4_alarm),
+            as_float(ds1),
+            as_float(ds2),
+            as_float(ds3),
+            as_float(ds4),
         ),
     )
     conn.commit()
@@ -475,4 +594,8 @@ def add_api():
         "humidity2": as_float(humidity2),
         "mq4": as_float(mq4),
         "mq4_alarm": as_int(mq4_alarm),
+        "ds1": as_float(ds1),
+        "ds2": as_float(ds2),
+        "ds3": as_float(ds3),
+        "ds4": as_float(ds4),
     })
