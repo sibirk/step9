@@ -124,6 +124,19 @@ def format_datetime(dt):
 def format_datetime_local(dt):
     return dt.strftime("%Y-%m-%dT%H:%M")
 
+FAVICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect x="12" y="2" width="8" height="18" rx="4" fill="#dff3fb" stroke="#3498db" stroke-width="2"/>
+  <rect x="14" y="12" width="4" height="10" fill="#e74c3c"/>
+  <circle cx="16" cy="24" r="7" fill="#e74c3c"/>
+</svg>
+"""
+
+
+@app.route("/favicon.svg")
+def favicon():
+    return app.response_class(FAVICON_SVG, mimetype="image/svg+xml")
+
+
 # Главная страница с графиком температуры
 @app.route("/")
 def read_index():
@@ -135,6 +148,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <title>Мониторинг температуры и влажности</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; background-color: #f9f9f9; color: #333; }
