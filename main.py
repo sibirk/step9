@@ -181,6 +181,26 @@ HTML_TEMPLATE = """
             font-size: 14px;
         }
         button:hover { background: #2c3e50; }
+        button:disabled, .field input:disabled { opacity: 0.6; cursor: wait; }
+        .loading-msg {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 0 0 12px;
+            color: #2c3e50;
+            font-size: 15px;
+        }
+        .loading-msg[hidden] { display: none; }
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid #d5d8dc;
+            border-top-color: #34495e;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #charts.charts-loading { opacity: 0.45; }
         .chart-wrap {
             background: white;
             padding: 20px;
@@ -211,6 +231,10 @@ HTML_TEMPLATE = """
         <button type="button" data-days="30">30 дней</button>
     </div>
 
+    <p id="loadingMsg" class="loading-msg" hidden>
+        <span class="spinner" aria-hidden="true"></span>
+        Загрузка данных…
+    </p>
     <p id="emptyMsg" class="empty-msg" style="display: none;">За выбранный период данных нет.</p>
     <div id="charts">
         <div class="chart-wrap">
@@ -330,8 +354,7 @@ HTML_TEMPLATE = """
                         {
                             label: 'T2, °C',
                             data: rows.map(item => item.temperature2),
-                            borderColor: '#c0392b',
-                            borderDash: [6, 4],
+                            borderColor: '#27ae60',
                             tension: 0.2,
                             fill: false,
                             pointRadius: 2
@@ -371,8 +394,7 @@ HTML_TEMPLATE = """
                         {
                             label: 'RH2, %',
                             data: rows.map(item => item.humidity2),
-                            borderColor: '#1abc9c',
-                            borderDash: [6, 4],
+                            borderColor: '#e74c3c',
                             tension: 0.2,
                             fill: false,
                             pointRadius: 2
@@ -492,14 +514,32 @@ HTML_TEMPLATE = """
             });
         }
 
-        async function loadChart(fromValue, toValue) {
-            const params = new URLSearchParams();
-            if (fromValue) params.set('from', fromValue);
-            if (toValue) params.set('to', toValue);
+        let loadSeq = 0;
 
-            const response = await fetch('/api/data?' + params.toString());
-            const data = await response.json();
-            buildChart(data);
+        function setLoading(isLoading) {
+            document.getElementById('loadingMsg').hidden = !isLoading;
+            document.getElementById('charts').classList.toggle('charts-loading', isLoading);
+            document.getElementById('charts').setAttribute('aria-busy', isLoading ? 'true' : 'false');
+            document.querySelectorAll('.controls button, .controls input').forEach(el => {
+                el.disabled = isLoading;
+            });
+        }
+
+        async function loadChart(fromValue, toValue) {
+            const seq = ++loadSeq;
+            setLoading(true);
+            try {
+                const params = new URLSearchParams();
+                if (fromValue) params.set('from', fromValue);
+                if (toValue) params.set('to', toValue);
+
+                const response = await fetch('/api/data?' + params.toString());
+                const data = await response.json();
+                if (seq !== loadSeq) return;
+                buildChart(data);
+            } finally {
+                if (seq === loadSeq) setLoading(false);
+            }
         }
 
         document.getElementById('applyBtn').addEventListener('click', () => {
@@ -554,6 +594,13 @@ def get_data():
     )
     rows = cursor.fetchall()
     conn.close()
+
+    # Длинный период рисуется долго: оставляем каждую третью точку и последнюю.
+    if date_to - date_from > timedelta(days=10) and len(rows) > 1:
+        last = rows[-1]
+        rows = rows[::3]
+        if rows[-1] is not last:
+            rows.append(last)
 
     data = [{
         "date": row[0],
