@@ -205,14 +205,25 @@ HTML_TEMPLATE = """
             <input type="datetime-local" id="dateTo">
         </div>
         <button type="button" id="applyBtn">Показать</button>
-        <button type="button" id="resetBtn">Последние 24 часа</button>
+        <button type="button" id="resetBtn">24 часа</button>
+        <button type="button" data-days="3">3 дня</button>
+        <button type="button" data-days="7">7 дней</button>
+        <button type="button" data-days="30">30 дней</button>
     </div>
 
     <p id="emptyMsg" class="empty-msg" style="display: none;">За выбранный период данных нет.</p>
     <div id="charts">
         <div class="chart-wrap">
-            <h2>Температура, влажность и MQ-4</h2>
+            <h2>Температура</h2>
             <canvas id="tempChart"></canvas>
+        </div>
+        <div class="chart-wrap">
+            <h2>Влажность</h2>
+            <canvas id="humChart"></canvas>
+        </div>
+        <div class="chart-wrap">
+            <h2>MQ-4</h2>
+            <canvas id="mqChart"></canvas>
         </div>
         <div class="chart-wrap">
             <h2>DS18B20</h2>
@@ -222,8 +233,12 @@ HTML_TEMPLATE = """
 
     <script>
         const ctx = document.getElementById('tempChart');
+        const humCtx = document.getElementById('humChart');
+        const mqCtx = document.getElementById('mqChart');
         const dsCtx = document.getElementById('dsChart');
         let chart = null;
+        let humChart = null;
+        let mqChart = null;
         let dsChart = null;
         const TZ_OFFSET_HOURS = 7;
 
@@ -242,10 +257,16 @@ HTML_TEMPLATE = """
             );
         }
 
-        function last24hRange() {
+        function recentRange(days) {
             const to = new Date();
-            const from = new Date(to.getTime() - 24 * 3600000);
+            const from = new Date(to.getTime() - days * 24 * 3600000);
             return [toLocalInputValue(from), toLocalInputValue(to)];
+        }
+
+        function applyRecent(days) {
+            const [fromValue, toValue] = recentRange(days);
+            setPeriodInputs(fromValue, toValue);
+            loadChart(fromValue, toValue);
         }
 
         function setPeriodInputs(fromValue, toValue) {
@@ -257,6 +278,14 @@ HTML_TEMPLATE = """
             if (chart) {
                 chart.destroy();
                 chart = null;
+            }
+            if (humChart) {
+                humChart.destroy();
+                humChart = null;
+            }
+            if (mqChart) {
+                mqChart.destroy();
+                mqChart = null;
             }
             if (dsChart) {
                 dsChart.destroy();
@@ -296,8 +325,7 @@ HTML_TEMPLATE = """
                             borderColor: '#e74c3c',
                             tension: 0.2,
                             fill: false,
-                            pointRadius: 2,
-                            yAxisID: 'yTemp'
+                            pointRadius: 2
                         },
                         {
                             label: 'T2, °C',
@@ -306,36 +334,7 @@ HTML_TEMPLATE = """
                             borderDash: [6, 4],
                             tension: 0.2,
                             fill: false,
-                            pointRadius: 2,
-                            yAxisID: 'yTemp'
-                        },
-                        {
-                            label: 'RH1, %',
-                            data: rows.map(item => item.humidity),
-                            borderColor: '#3498db',
-                            tension: 0.2,
-                            fill: false,
-                            pointRadius: 2,
-                            yAxisID: 'yHum'
-                        },
-                        {
-                            label: 'RH2, %',
-                            data: rows.map(item => item.humidity2),
-                            borderColor: '#1abc9c',
-                            borderDash: [6, 4],
-                            tension: 0.2,
-                            fill: false,
-                            pointRadius: 2,
-                            yAxisID: 'yHum'
-                        },
-                        {
-                            label: 'MQ-4, мВ',
-                            data: rows.map(item => item.mq4),
-                            borderColor: '#8e44ad',
-                            tension: 0.2,
-                            fill: false,
-                            pointRadius: 2,
-                            yAxisID: 'yMq'
+                            pointRadius: 2
                         }
                     ]
                 },
@@ -345,24 +344,85 @@ HTML_TEMPLATE = """
                     aspectRatio: 2.5,
                     scales: {
                         x: timeScale(),
-                        yTemp: {
+                        y: {
                             type: 'linear',
                             position: 'left',
                             title: { display: true, text: 'Температура, °C' }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: true }
+                    }
+                }
+            });
+            humChart = new Chart(humCtx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'RH1, %',
+                            data: rows.map(item => item.humidity),
+                            borderColor: '#3498db',
+                            tension: 0.2,
+                            fill: false,
+                            pointRadius: 2
                         },
-                        yHum: {
+                        {
+                            label: 'RH2, %',
+                            data: rows.map(item => item.humidity2),
+                            borderColor: '#1abc9c',
+                            borderDash: [6, 4],
+                            tension: 0.2,
+                            fill: false,
+                            pointRadius: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    aspectRatio: 2.5,
+                    scales: {
+                        x: timeScale(),
+                        y: {
                             type: 'linear',
-                            position: 'right',
+                            position: 'left',
                             min: 0,
                             max: 100,
-                            title: { display: true, text: 'Влажность, %' },
-                            grid: { drawOnChartArea: false }
-                        },
-                        yMq: {
+                            title: { display: true, text: 'Влажность, %' }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: true }
+                    }
+                }
+            });
+            mqChart = new Chart(mqCtx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'MQ-4, мВ',
+                            data: rows.map(item => item.mq4),
+                            borderColor: '#8e44ad',
+                            tension: 0.2,
+                            fill: false,
+                            pointRadius: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: true,
+                    aspectRatio: 2.5,
+                    scales: {
+                        x: timeScale(),
+                        y: {
                             type: 'linear',
-                            position: 'right',
-                            title: { display: true, text: 'MQ-4, мВ' },
-                            grid: { drawOnChartArea: false }
+                            position: 'left',
+                            title: { display: true, text: 'MQ-4, мВ' }
                         }
                     },
                     plugins: {
@@ -450,16 +510,16 @@ HTML_TEMPLATE = """
         });
 
         document.getElementById('resetBtn').addEventListener('click', () => {
-            const [fromValue, toValue] = last24hRange();
-            setPeriodInputs(fromValue, toValue);
-            loadChart(fromValue, toValue);
+            applyRecent(1);
         });
 
-        {
-            const [fromValue, toValue] = last24hRange();
-            setPeriodInputs(fromValue, toValue);
-            loadChart(fromValue, toValue);
-        }
+        document.querySelectorAll('button[data-days]').forEach(button => {
+            button.addEventListener('click', () => {
+                applyRecent(Number(button.dataset.days));
+            });
+        });
+
+        applyRecent(1);
     </script>
 </body>
 </html>
