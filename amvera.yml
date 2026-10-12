@@ -7,8 +7,9 @@ build:
   requirementsPath: requirements.txt
   useCache: true
 run:
-  persistenceMount: /data
+  scriptName: null
   command: gunicorn --bind 0.0.0.0:80 main:app
+  persistenceMount: /data
   containerPort: 80
   russianTrustedCa: false
   singleton: false

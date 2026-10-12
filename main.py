@@ -93,6 +93,18 @@ def init_db():
     ensure_column(cursor, "ds3", "REAL")
     ensure_column(cursor, "ds4", "REAL")
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS phone_journal (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            device TEXT NOT NULL,
+            local_id INTEGER NOT NULL,
+            at_ms INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            received TEXT NOT NULL,
+            UNIQUE(device, local_id)
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -153,6 +165,17 @@ HTML_TEMPLATE = """
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; background-color: #f9f9f9; color: #333; }
         h1 { color: #2c3e50; }
+        a.nav-btn {
+            display: inline-block;
+            margin: 0 0 8px;
+            padding: 9px 18px;
+            border-radius: 4px;
+            background: #0d47a1;
+            color: white;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        a.nav-btn:hover { background: #1565c0; }
         .controls {
             display: flex;
             flex-wrap: wrap;
@@ -214,6 +237,7 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <h1>Графики датчиков</h1>
+    <a class="nav-btn" href="/journal">Журнал МП</a>
 
     <div class="controls">
         <div class="field">
@@ -624,6 +648,129 @@ def get_data():
         })
 
     return jsonify(data)
+
+JOURNAL_HTML = """
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Журнал МП</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background-color: #f9f9f9; color: #333; }
+        h1 { color: #2c3e50; }
+        a.nav-btn {
+            display: inline-block;
+            margin: 0 8px 16px 0;
+            padding: 9px 18px;
+            border-radius: 4px;
+            background: #34495e;
+            color: white;
+            text-decoration: none;
+            font-size: 14px;
+        }
+        a.nav-btn:hover { background: #2c3e50; }
+        table { border-collapse: collapse; width: 100%; background: white; }
+        th, td { border-bottom: 1px solid #e6e6e6; padding: 8px 10px; text-align: left; vertical-align: top; }
+        th { background: #f4f6f7; color: #555; font-size: 13px; }
+        td { font-size: 14px; }
+        .when { white-space: nowrap; }
+        .device { color: #777; font-size: 12px; white-space: nowrap; }
+        .empty { color: #777; }
+    </style>
+</head>
+<body>
+    <h1>Журнал МП</h1>
+    <a class="nav-btn" href="/">К графикам</a>
+    <a class="nav-btn" href="/journal">Обновить</a>
+    {% if rows %}
+    <table>
+        <tr>
+            <th>Время</th>
+            <th>Телефон</th>
+            <th>Событие</th>
+        </tr>
+        {% for row in rows %}
+        <tr>
+            <td class="when">{{ row.when }}</td>
+            <td class="device">{{ row.device }}</td>
+            <td>{{ row.text }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% else %}
+    <p class="empty">Записей пока нет.</p>
+    {% endif %}
+</body>
+</html>
+"""
+
+
+def epoch_local(ms):
+    moment = datetime.fromtimestamp(ms / 1000.0, timezone.utc).replace(tzinfo=None)
+    return format_datetime(moment + timedelta(hours=TZ_OFFSET_HOURS))
+
+
+@app.route("/journal")
+def journal_page():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT at_ms, device, text
+        FROM phone_journal
+        ORDER BY at_ms DESC, id DESC
+        LIMIT 400
+        """
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    items = [{
+        "when": epoch_local(row[0]) if row[0] else "",
+        "device": row[1],
+        "text": row[2],
+    } for row in rows]
+    return render_template_string(JOURNAL_HTML, rows=items)
+
+
+@app.route("/api/journal", methods=["POST"])
+def add_journal():
+    if not api_key_ok():
+        return jsonify({"status": "error", "message": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    device = str(data.get("device") or "").strip()[:64]
+    events = data.get("events")
+    if not device or not isinstance(events, list):
+        return jsonify({"status": "error", "message": "Missing device or events"}), 400
+    if len(events) > 50:
+        return jsonify({"status": "error", "message": "Too many events"}), 400
+    received = format_datetime(local_now())
+    rows = []
+    for item in events:
+        if not isinstance(item, dict):
+            continue
+        try:
+            local_id = int(item.get("id"))
+            at_ms = int(item.get("at"))
+        except (TypeError, ValueError):
+            continue
+        text = str(item.get("text") or "").replace("\x00", "").strip()
+        if not text or local_id <= 0:
+            continue
+        rows.append((device, local_id, at_ms, text[:500], received))
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.executemany(
+        """
+        INSERT OR IGNORE INTO phone_journal (device, local_id, at_ms, text, received)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "success", "accepted": len(rows)})
+
 
 # API метод для добавления данных (принимает как JSON, так и URL-параметры)
 @app.route("/api/add", methods=["POST", "GET"])
