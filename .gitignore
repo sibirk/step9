@@ -1,6 +1,10 @@
 __pycache__/
 *.pyc
 weather.db
+azs_update.zip
+azs_update.zip.part
+azs_update.json
+azs_update.json.part
 .env
 env/
 .vs/

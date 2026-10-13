@@ -8,7 +8,7 @@ build:
   useCache: true
 run:
   scriptName: null
-  command: gunicorn --bind 0.0.0.0:80 main:app
+  command: gunicorn --bind 0.0.0.0:80 --workers 1 --worker-class gthread --threads 4 --timeout 1800 main:app
   persistenceMount: /data
   containerPort: 80
   russianTrustedCa: false
