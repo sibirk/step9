@@ -4,6 +4,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from flask import Flask, render_template_string, request, jsonify
 
+
 app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
