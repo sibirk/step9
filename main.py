@@ -557,7 +557,7 @@ HTML_TEMPLATE = """
                     labels: labels,
                     datasets: [
                         {
-                            label: 'T1, °C',
+                            label: 'Котельная, °C',
                             data: rows.map(item => item.temperature),
                             borderColor: '#e74c3c',
                             tension: 0.2,
@@ -565,12 +565,13 @@ HTML_TEMPLATE = """
                             pointRadius: 2
                         },
                         {
-                            label: 'T2, °C',
-                            data: rows.map(item => item.temperature2),
-                            borderColor: '#27ae60',
+                            label: 'Бойлер, °C',
+                            data: rows.map(item => item.ds3),
+                            borderColor: '#16a085',
                             tension: 0.2,
                             fill: false,
-                            pointRadius: 2
+                            pointRadius: 2,
+                            spanGaps: true
                         }
                     ]
                 },
@@ -671,7 +672,7 @@ HTML_TEMPLATE = """
                     labels: labels,
                     datasets: [
                         {
-                            label: 'DS1, °C',
+                            label: 'ТП подача, °C',
                             data: rows.map(item => item.ds1),
                             borderColor: '#e67e22',
                             tension: 0.2,
@@ -680,7 +681,7 @@ HTML_TEMPLATE = """
                             spanGaps: true
                         },
                         {
-                            label: 'DS2, °C',
+                            label: 'Подача, °C',
                             data: rows.map(item => item.ds2),
                             borderColor: '#f1c40f',
                             tension: 0.2,
@@ -689,22 +690,21 @@ HTML_TEMPLATE = """
                             spanGaps: true
                         },
                         {
-                            label: 'DS3, °C',
-                            data: rows.map(item => item.ds3),
-                            borderColor: '#16a085',
-                            tension: 0.2,
-                            fill: false,
-                            pointRadius: 2,
-                            spanGaps: true
-                        },
-                        {
-                            label: 'DS4, °C',
+                            label: 'ТП обратка, °C',
                             data: rows.map(item => item.ds4),
                             borderColor: '#2c3e50',
                             tension: 0.2,
                             fill: false,
                             pointRadius: 2,
                             spanGaps: true
+                        },
+                        {
+                            label: 'Обратка, °C',
+                            data: rows.map(item => item.temperature2),
+                            borderColor: '#27ae60',
+                            tension: 0.2,
+                            fill: false,
+                            pointRadius: 2
                         }
                     ]
                 },
